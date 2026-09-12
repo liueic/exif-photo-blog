@@ -2,8 +2,8 @@
 #
 # One-time setup (see DEPLOY.md):
 #   GitHub repo → Settings → Secrets and variables → Actions:
-#     - TENCENTCLOUD_SECRETID  (Tencent Cloud API key id)
-#     - TENCENTCLOUD_SECRETKEY (Tencent Cloud API key secret)
+#     - TCB_API_KEY — CloudBase environment API key
+#       (create with: tcb env apikey create <name> -e <envId>)
 name: Deploy to CloudBase Run
 
 on:
@@ -53,10 +53,11 @@ jobs:
         run: npm install -g @cloudbase/cli@3
 
       - name: Log in to CloudBase
+        # Environment-level API key: scoped to this environment only
         run: >
           tcb login
-          --apiKeyId "${{ secrets.TENCENTCLOUD_SECRETID }}"
-          --apiKey "${{ secrets.TENCENTCLOUD_SECRETKEY }}"
+          --cloudbase-api-key "${{ secrets.TCB_API_KEY }}"
+          -e "$CLOUDBASE_ENV_ID"
 
       - name: Deploy service
         # Uploads the source (including the Dockerfile) and builds remotely;

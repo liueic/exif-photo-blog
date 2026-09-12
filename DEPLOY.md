@@ -62,13 +62,22 @@ Repository → Settings → Secrets and variables → Actions:
 
 | Secret | Purpose |
 | --- | --- |
-| `TENCENTCLOUD_SECRETID` | Tencent Cloud API key id (account-level, used by `tcb login`) |
-| `TENCENTCLOUD_SECRETKEY` | Matching secret |
+| `TCB_API_KEY` | CloudBase environment API key — the only credential CI needs; scoped to this environment |
 
-Create the key pair at [console.cloud.tencent.com/cam/capi](https://console.cloud.tencent.com/cam/capi).
-For a smaller blast radius you can instead create an environment-level key
-(`tcb env apikey create`) and change the login step in
-`.github/workflows/deploy.yml` to `tcb login --cloudbase-api-key <key> -e <envId>`.
+Create it with the CLI (the plaintext is shown once and piped straight into
+GitHub, never touching the repo):
+
+```bash
+tcb env apikey create ci-github-actions -e codebuddy-test-3gdqhtzxa73afca7 --json \
+  | jq -r '.data.ApiKey' \
+  | gh secret set TCB_API_KEY --repo <owner>/<repo>
+```
+
+Alternatively use an account-level Tencent Cloud key pair
+(`TENCENTCLOUD_SECRETID`/`TENCENTCLOUD_SECRETKEY` from
+[console.cloud.tencent.com/cam/capi](https://console.cloud.tencent.com/cam/capi))
+by changing the login step in `.github/workflows/deploy.yml` back to
+`tcb login --apiKeyId … --apiKey …` — broader permissions, not recommended.
 
 ## CI/CD
 
