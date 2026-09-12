@@ -11,7 +11,7 @@ import { getDataForCategoriesCached } from '@/category/cache';
 import { getPhotosMetaCached } from '@/photo/cache';
 import { FEED_META_QUERY_OPTIONS, feedQueryOptions } from '@/feed';
 
-export const dynamic = 'force-static';
+export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
 
 const getPhotosCached = cache(() => getPhotos(feedQueryOptions({

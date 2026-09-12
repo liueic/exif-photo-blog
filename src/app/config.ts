@@ -163,10 +163,10 @@ export const ABOUT_DESCRIPTION_DEFAULT =
 // STORAGE
 
 // STORAGE: DATABASE
-export const HAS_DATABASE =
-  Boolean(process.env.POSTGRES_URL);
-export const POSTGRES_SSL_ENABLED =
-  process.env.DISABLE_POSTGRES_SSL === '1' ? false : true;
+// The document database lives inside the CloudBase environment, so the
+// environment id doubles as the database configuration
+export const CLOUDBASE_ENV = process.env.CLOUDBASE_ENV;
+export const HAS_DATABASE = Boolean(CLOUDBASE_ENV);
 
 // STORAGE: REDIS
 export const REDIS_URL = normalizeRedisUrl(
@@ -219,24 +219,42 @@ export const HAS_MINIO_STORAGE =
   Boolean(process.env.MINIO_ACCESS_KEY) &&
   Boolean(process.env.MINIO_SECRET_ACCESS_KEY);
 
+// STORAGE: CLOUDBASE (Tencent COS)
+// The bucket lives inside the CloudBase environment and is reached through
+// its CDN domain. Server-side access accepts either a CloudBase environment
+// API Key or a Tencent Cloud key pair.
+export const HAS_CLOUDBASE_STORAGE_CLIENT =
+  Boolean(process.env.NEXT_PUBLIC_CLOUDBASE_STORAGE_BUCKET) &&
+  Boolean(process.env.NEXT_PUBLIC_CLOUDBASE_STORAGE_DOMAIN);
+export const HAS_CLOUDBASE_CREDENTIALS = Boolean(
+  process.env.CLOUDBASE_APIKEY ||
+  process.env.CLOUDBASE_API_KEY ||
+  (process.env.TENCENTCLOUD_SECRETID && process.env.TENCENTCLOUD_SECRETKEY),
+);
+export const HAS_CLOUDBASE_STORAGE =
+  HAS_CLOUDBASE_STORAGE_CLIENT && HAS_CLOUDBASE_CREDENTIALS;
+
 export const HAS_MULTIPLE_STORAGE_PROVIDERS = [
   HAS_VERCEL_BLOB_STORAGE,
   HAS_CLOUDFLARE_R2_STORAGE,
   HAS_AWS_S3_STORAGE,
   HAS_MINIO_STORAGE,
+  HAS_CLOUDBASE_STORAGE,
 ].filter(Boolean).length > 1;
 
 // Storage preference requires client-available keys
 // so it can be reached in the browser when uploading
 export const CURRENT_STORAGE: StorageType =
   (process.env.NEXT_PUBLIC_STORAGE_PREFERENCE as StorageType | undefined) || (
-    HAS_MINIO_STORAGE_CLIENT
-      ? 'minio'
-      : HAS_CLOUDFLARE_R2_STORAGE_CLIENT
-        ? 'cloudflare-r2'
-        : HAS_AWS_S3_STORAGE_CLIENT
-          ? 'aws-s3'
-          : 'vercel-blob'
+    HAS_CLOUDBASE_STORAGE_CLIENT
+      ? 'cloudbase-storage'
+      : HAS_MINIO_STORAGE_CLIENT
+        ? 'minio'
+        : HAS_CLOUDFLARE_R2_STORAGE_CLIENT
+          ? 'cloudflare-r2'
+          : HAS_AWS_S3_STORAGE_CLIENT
+            ? 'aws-s3'
+            : 'vercel-blob'
   );
 
 // PERFORMANCE
@@ -274,17 +292,34 @@ export const BLUR_ENABLED =
 
 // AI
 
-// AI text generation supports two providers, selected purely by which
+// AI text generation supports three providers, selected purely by which
 // switch var is set (no separate provider-selection var):
 //   OPENAI_SECRET_KEY set     -> direct OpenAI (explicit opt-in; wins if both)
+//   else CLOUDBASE_AI_API_KEY -> CloudBase AI (platform default on CloudBase)
 //   else AI_GATEWAY_MODEL set -> Vercel AI Gateway
 //   else                      -> off (a fresh deploy never calls an LLM)
-// Both switch vars are trimmed so a blank/whitespace value can't accidentally
+// All switch vars are trimmed so a blank/whitespace value can't accidentally
 // win precedence or (for the gateway) construct an invalid model.
 export const OPENAI_SECRET_KEY =
   process.env.OPENAI_SECRET_KEY?.trim() || undefined;
 export const OPENAI_MODEL = process.env.OPENAI_MODEL;
 export const OPENAI_BASE_URL = process.env.OPENAI_BASE_URL;
+// CloudBase AI: OpenAI-compatible gateway
+// (https://docs.cloudbase.net/ai/model/openai-sdk-access) billed through the
+// environment's resource points. A dedicated key wins, but the environment
+// API key already used for storage credentials is accepted as a fallback so
+// one key can serve both. The base URL is derived from CLOUDBASE_ENV — the
+// environment id is a single source of truth, never duplicated here.
+export const CLOUDBASE_AI_API_KEY =
+  process.env.CLOUDBASE_AI_API_KEY?.trim() ||
+  process.env.CLOUDBASE_APIKEY?.trim() ||
+  process.env.CLOUDBASE_API_KEY?.trim() ||
+  undefined;
+export const CLOUDBASE_AI_MODEL =
+  process.env.CLOUDBASE_AI_MODEL?.trim() || undefined;
+export const CLOUDBASE_AI_BASE_URL = CLOUDBASE_ENV
+  ? `https://${CLOUDBASE_ENV}.api.tcloudbasegateway.com/v1/ai/cloudbase`
+  : undefined;
 // Vercel AI Gateway: routes through https://vercel.com/docs/ai-gateway.
 // Model strings use the 'creator/model-name' format, e.g. 'openai/gpt-5.2'.
 // AI_GATEWAY_API_KEY is only required outside Vercel-hosted deployments —
@@ -293,17 +328,24 @@ export const AI_GATEWAY_API_KEY = process.env.AI_GATEWAY_API_KEY;
 export const AI_GATEWAY_MODEL =
   process.env.AI_GATEWAY_MODEL?.trim() || undefined;
 
-type AiTextGenerationProvider = 'openai' | 'gateway' | undefined;
+type AiTextGenerationProvider =
+  | 'openai'
+  | 'cloudbase-ai'
+  | 'gateway'
+  | undefined;
 
-// Direct OpenAI is the explicit override: setting a secret key is a
-// deliberate act, so it wins over an ambient Gateway model. Gateway is the
-// recommended default when no OpenAI key is present.
+// Direct OpenAI stays the explicit override: setting a secret key is a
+// deliberate act, so it wins over the platform default. CloudBase AI in turn
+// wins over the Gateway, making it the natural default when the app is
+// deployed inside a CloudBase environment.
 export const AI_ACTIVE_TEXT_GENERATION_PROVIDER: AiTextGenerationProvider =
   OPENAI_SECRET_KEY
     ? 'openai'
-    : AI_GATEWAY_MODEL
-      ? 'gateway'
-      : undefined;
+    : CLOUDBASE_AI_API_KEY && CLOUDBASE_AI_BASE_URL
+      ? 'cloudbase-ai'
+      : AI_GATEWAY_MODEL
+        ? 'gateway'
+        : undefined;
 export const AI_CONTENT_GENERATION_ENABLED =
   Boolean(AI_ACTIVE_TEXT_GENERATION_PROVIDER);
 export const AI_TEXT_AUTO_GENERATED_FIELDS = parseAiAutoGeneratedFieldsString(
@@ -466,17 +508,19 @@ export const ADMIN_AI_MODEL_DEBUG_ENABLED =
 export const APP_CONFIGURATION = {
   // Storage
   hasDatabase: HAS_DATABASE,
-  isPostgresSslEnabled: POSTGRES_SSL_ENABLED,
+  cloudbaseEnv: CLOUDBASE_ENV,
   hasRedisStorage: HAS_REDIS_STORAGE,
   hasVercelBlobStorage: HAS_VERCEL_BLOB_STORAGE,
   hasCloudflareR2Storage: HAS_CLOUDFLARE_R2_STORAGE,
   hasAwsS3Storage: HAS_AWS_S3_STORAGE,
   hasMinioStorage: HAS_MINIO_STORAGE,
+  hasCloudbaseStorage: HAS_CLOUDBASE_STORAGE,
   hasStorageProvider: (
     HAS_VERCEL_BLOB_STORAGE ||
     HAS_CLOUDFLARE_R2_STORAGE ||
     HAS_AWS_S3_STORAGE ||
-    HAS_MINIO_STORAGE
+    HAS_MINIO_STORAGE ||
+    HAS_CLOUDBASE_STORAGE
   ),
   hasMultipleStorageProviders: HAS_MULTIPLE_STORAGE_PROVIDERS,
   currentStorage: CURRENT_STORAGE,
@@ -521,6 +565,9 @@ export const APP_CONFIGURATION = {
   hasOpenaiSecretKey: Boolean(OPENAI_SECRET_KEY),
   hasOpenaiModel: Boolean(OPENAI_MODEL),
   hasOpenaiBaseUrl: Boolean(OPENAI_BASE_URL),
+  hasCloudbaseAiApiKey: Boolean(CLOUDBASE_AI_API_KEY),
+  hasCloudbaseAiBaseUrl: Boolean(CLOUDBASE_AI_BASE_URL),
+  cloudbaseAiModel: CLOUDBASE_AI_MODEL,
   hasAiGatewayModel: Boolean(AI_GATEWAY_MODEL),
   aiActiveTextGenerationProvider: AI_ACTIVE_TEXT_GENERATION_PROVIDER,
   isAiTextGenerationEnabled: AI_CONTENT_GENERATION_ENABLED,

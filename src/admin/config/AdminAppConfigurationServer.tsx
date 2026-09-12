@@ -1,7 +1,7 @@
 import AdminAppConfigurationClient from './AdminAppConfigurationClient';
 import { APP_CONFIGURATION } from '@/app/config';
 import { testConnectionsAction } from '@/admin/actions';
-import { generateAuthSecret } from '@/auth';
+import { generateAuthSecret } from '@/auth/server';
 
 export default async function AdminAppConfigurationServer({
   simplifiedView,

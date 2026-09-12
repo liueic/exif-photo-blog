@@ -1,96 +1,49 @@
-import { migrationForError } from './migration';
-import { createPhotosTable } from '@/photo/query';
 import sleep from '@/utility/sleep';
 import { ADMIN_SQL_DEBUG_ENABLED } from '@/app/config';
-import { createAlbumPhotoTable, createAlbumsTable } from '@/album/query';
-import { createAboutTable } from '@/about/query';
 
-// Safe wrapper intended for most queries with JIT migration/table creation
-// Catches up to 3 migrations in older installations
+// Transient connectivity issues are worth a single retry. Unlike the previous
+// Postgres implementation, errors are no longer matched against SQL error
+// text because there is no longer any JIT schema migration to trigger.
+const TRANSIENT_ERROR_PATTERN = new RegExp([
+  'endpoint is in transition',
+  'ECONNRESET',
+  'ETIMEDOUT',
+  'socket hang up',
+  'network error',
+  'timed out',
+  'timeout',
+].join('|'), 'i');
+
+/** Safe wrapper intended for most queries, adding a retry and debug timing */
 export const safelyQuery = async <T>(
   callback: () => Promise<T>,
   queryLabel: string,
   queryOptions?: object,
 ): Promise<T> => {
-  let result: T;
-
   const start = new Date();
+
+  let result: T;
 
   try {
     result = await callback();
   } catch (e: any) {
-    // Catch 1st migration
-    let migration = migrationForError(e);
-    if (migration) {
-      console.log(`Running Migration ${migration.label} ...`);
-      await migration.run();
-      try {
-        result = await callback();
-      } catch (e: any) {
-        // Catch 2nd migration
-        migration = migrationForError(e);
-        if (migration) {
-          console.log(`Running Migration ${migration.label} ...`);
-          await migration.run();
-          result = await callback();
-        } else {
-          try {
-            result = await callback();
-          } catch (e: any) {
-            // Catch 3rd migration
-            migration = migrationForError(e);
-            if (migration) {
-              console.log(`Running Migration ${migration.label} ...`);
-              await migration.run();
-              result = await callback();
-            } else {
-              throw e;
-            }
-          }
-        }
-      }
-    } else if (/relation "photos" does not exist/i.test(e.message)) {
-      // Create all tables if 'photos' doesn't exist
-      console.log('Creating all tables ...');
-      await createPhotosTable();
-      await createAlbumsTable();
-      await createAlbumPhotoTable();
-      await createAboutTable();
-      result = await callback();
-    } else if (/relation "albums" does not exist/i.test(e.message)) {
-      // Create albums tables if they don't exist
-      console.log('Creating albums tables ...');
-      await createAlbumsTable();
-      await createAlbumPhotoTable();
-      result = await callback();
-    } else if (/relation "about" does not exist/i.test(e.message)) {
-      // Create about table if it doesn't exist
-      console.log('Creating about table ...');
-      await createAboutTable();
-      result = await callback();
-    } else if (/endpoint is in transition/i.test(e.message)) {
+    const message = e?.message ?? `${e}`;
+
+    if (TRANSIENT_ERROR_PATTERN.test(message)) {
       console.log(
-        'SQL query error: endpoint is in transition (setting timeout)',
+        `Query error (${queryLabel}), retrying in 2000ms: ${message}`,
       );
-      // Wait 5 seconds and try again
-      await sleep(5000);
+      await sleep(2000);
       try {
         result = await callback();
-      } catch (e: any) {
+      } catch (retryError: any) {
         console.log(
-          `SQL query error on retry (after 5000ms): ${e.message}`,
+          `Query error on retry (${queryLabel}): ${retryError?.message}`,
         );
-        throw e;
+        throw retryError;
       }
     } else {
-      // Avoid re-logging common errors on initial installation
-      if (/connect ECONNREFUSED/i.test(e.message)) {
-        console.log('Database connection error');
-      } else if (e.message !== 'The server does not support SSL connections') {
-        console.log(`SQL query error (${queryLabel}): ${e.message}`, {
-          error: e,
-        });
-      }
+      console.log(`Query error (${queryLabel}): ${message}`, { error: e });
       throw e;
     }
   }

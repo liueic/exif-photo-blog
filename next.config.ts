@@ -21,6 +21,9 @@ const HOSTNAME_AWS_S3 =
     ? `${process.env.NEXT_PUBLIC_AWS_S3_BUCKET}.s3.${process.env.NEXT_PUBLIC_AWS_S3_REGION}.amazonaws.com`
     : undefined;
 
+const HOSTNAME_CLOUDBASE_STORAGE =
+  process.env.NEXT_PUBLIC_CLOUDBASE_STORAGE_DOMAIN;
+
 const HOSTNAME_MINIO =
   process.env.NEXT_PUBLIC_MINIO_DOMAIN;
 const MINIO_PORT =
@@ -64,6 +67,9 @@ if (HOSTNAME_MINIO) {
     MINIO_USE_SSL,
   ));
 }
+if (HOSTNAME_CLOUDBASE_STORAGE) {
+  remotePatterns.push(generateRemotePattern(HOSTNAME_CLOUDBASE_STORAGE));
+}
 
 const LOCALE = process.env.NEXT_PUBLIC_LOCALE || 'en-us';
 const LOCALE_ALIAS = './date-fns-locale-alias';
@@ -75,13 +81,33 @@ const IMAGE_QUALITY =
     : 75;
 
 const nextConfig: NextConfig = {
+  // Emit a self-contained server bundle for container hosts
+  // (CloudBase Run); the image is built from `.next/standalone`
+  output: 'standalone',
   images: {
     imageSizes: [200],
     qualities: [75, IMAGE_QUALITY],
     remotePatterns,
     minimumCacheTTL: 31536000,
   },
-  serverExternalPackages: ['exifr'],
+  serverExternalPackages: ['exifr', '@cloudbase/node-sdk'],
+  // ESM-only packages required (transitively) by app code; also makes
+  // next/jest transform them so jest's CJS runtime can load them
+  transpilePackages: [
+    '@upstash/redis',
+    'uncrypto',
+    'camelcase-keys',
+    'camelcase',
+    'map-obj',
+    'quick-lru',
+    // sanitize-html → htmlparser2 DOM parsing stack
+    'htmlparser2',
+    'domhandler',
+    'domutils',
+    'domelementtype',
+    'dom-serializer',
+    'entities',
+  ],
   turbopack: {
     resolveAlias: {
       [LOCALE_ALIAS]: `@/${LOCALE_DYNAMIC}`,

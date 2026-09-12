@@ -31,9 +31,9 @@ import {
 } from './form';
 import { redirect } from 'next/navigation';
 import {
-  deleteFile,
   getFileNamePartsFromStorageUrl,
 } from '@/platforms/storage';
+import { deleteFile } from '@/platforms/storage/server';
 import {
   revalidateAdminPaths,
   revalidateAllKeysAndPaths,
@@ -87,7 +87,7 @@ import {
   upgradeTagToAlbum,
 } from '@/album/server';
 import { addPhotoAlbumIds } from '@/album/query';
-import { getStorageUrlsForPhoto } from './storage';
+import { deleteFilesForPhotoUrl } from './storage/server';
 import type { VisibilityValue } from './visibility';
 import {
   COMMAND_K_PHOTO_LIMIT,
@@ -555,9 +555,9 @@ export const replacePhotoStorageAction = async (
 
       await storeOptimizedPhotosForUrl(updatedStorageUrl);
 
-      const existingStorageUrls = await getStorageUrlsForPhoto(photo)
-        .then(urls => urls.map(({ url }) => url));
-      await Promise.all(existingStorageUrls.map(deleteFile));
+      // Variant file names are deterministic, so every file belonging to the
+      // replaced photo can be removed without listing the bucket
+      await deleteFilesForPhotoUrl(photo.url);
 
       revalidatePhoto(photo.id);
     }

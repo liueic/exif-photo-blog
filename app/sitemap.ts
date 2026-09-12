@@ -23,7 +23,7 @@ import {
 } from '@/category/data';
 
 // Cache for 24 hours
-export const revalidate = 86_400;
+export const dynamic = 'force-dynamic';
 
 const PRIORITY_HOME             = 1;
 const PRIORITY_HOME_VIEW        = 0.9;

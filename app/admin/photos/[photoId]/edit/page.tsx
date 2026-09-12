@@ -20,8 +20,8 @@ import {
 import { blurImageFromUrl, resizeImageFromUrl } from '@/photo/server';
 import {
   getOptimizedPhotoUrlForManipulation,
-  getStorageUrlsForPhoto,
 } from '@/photo/storage';
+import { getStorageUrlsForPhoto } from '@/photo/storage/server';
 
 export default async function PhotoEditPage({
   params,

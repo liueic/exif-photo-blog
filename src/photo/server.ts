@@ -1,7 +1,5 @@
-import {
-  deleteFilesWithPrefix,
-  getFileNamePartsFromStorageUrl,
-} from '@/platforms/storage';
+import { getFileNamePartsFromStorageUrl } from '@/platforms/storage';
+import { deleteFilesForPhotoUrl } from './storage/server';
 import { convertFormDataToPhotoDbInsert } from '@/photo/form';
 import {
   FujifilmSimulation,
@@ -338,7 +336,4 @@ export const deletePhotoAndFiles = async (
   photoUrl: string,
 ) =>
   deletePhoto(photoId)
-    .then(() => {
-      const { fileNameBase } = getFileNamePartsFromStorageUrl(photoUrl);
-      return deleteFilesWithPrefix(fileNameBase);
-    });
+    .then(() => deleteFilesForPhotoUrl(photoUrl));

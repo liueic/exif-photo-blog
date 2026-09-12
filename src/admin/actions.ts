@@ -3,8 +3,8 @@
 import { runAuthenticatedAdminServerAction } from '@/auth/server';
 import { testRedisConnection } from '@/platforms/redis';
 import { testOpenAiConnection } from '@/platforms/openai';
-import { testDatabaseConnection } from '@/platforms/postgres';
-import { testStorageConnection } from '@/platforms/storage';
+import { testDatabaseConnection } from '@/platforms/cloudbase';
+import { testStorageConnection } from '@/platforms/storage/server';
 import { testGooglePlacesConnection } from '@/platforms/google-places';
 import { APP_CONFIGURATION } from '@/app/config';
 import { getStorageUploadUrlsNoStore } from '@/platforms/storage/cache';

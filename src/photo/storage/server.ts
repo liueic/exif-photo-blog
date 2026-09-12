@@ -1,15 +1,27 @@
 import {
+  StorageListResponse,
   copyFile,
   deleteFile,
-  getFileNamePartsFromStorageUrl,
+  getSignedUrlForUrl,
+  getStorageUrlsForPrefix,
   moveFile,
   putFile,
-} from '@/platforms/storage';
+} from '@/platforms/storage/server';
 import { removeGpsData, resizeImageToBytes } from '../server';
 import {
   generateRandomFileNameForPhoto,
   getOptimizedPhotoFileMeta,
+  getOptimizedPhotoUrl,
+  getOptimizedPhotoUrlForSuffix,
+  getOptimizedUrlsFromPhotoUrl,
 } from '.';
+import { Photo } from '..';
+import { fetchBase64ImageFromUrl } from '@/utility/image';
+import { NextImageSize } from '@/platforms/next-image';
+import { getFileNamePartsFromStorageUrl } from '@/platforms/storage';
+
+const PREFIX_PHOTO = 'photo';
+const PREFIX_UPLOAD = 'upload';
 
 export const storeOptimizedPhotosForUrl = async (
   url: string,
@@ -62,3 +74,75 @@ export const convertUploadToPhoto = async ({
 
   return updatedUrl;
 };
+
+// STORAGE QUERIES
+
+export const getStorageUploadUrls = () =>
+  getStorageUrlsForPrefix(`${PREFIX_UPLOAD}-`);
+
+export const getStoragePhotoUrls = () =>
+  getStorageUrlsForPrefix(`${PREFIX_PHOTO}-`);
+
+/**
+ * Deletes a photo plus every optimized variant it may have.
+ *
+ * Variant file names are deterministic (`<base>-sm|md|lg.jpg`), so this does
+ * not depend on being able to list the bucket — which CloudBase storage does
+ * not support.
+ */
+export const deleteFilesForPhotoUrl = async (url: string) =>
+  Promise.all(
+    [url, ...getOptimizedUrlsFromPhotoUrl(url)].map(candidate =>
+      deleteFile(candidate).catch(() => undefined)),
+  );
+
+export const getStorageUrlsForPhoto = async ({ url }: Photo) => {
+  const getSortScoreForUrl = (url: string) => {
+    const { fileNameBase } = getFileNamePartsFromStorageUrl(url);
+    if (fileNameBase.endsWith('-sm')) { return 1; }
+    if (fileNameBase.endsWith('-md')) { return 2; }
+    if (fileNameBase.endsWith('-lg')) { return 3; }
+    return 0;
+  };
+
+  const { fileNameBase } = getFileNamePartsFromStorageUrl(url);
+
+  return getStorageUrlsForPrefix(fileNameBase).then(urls =>
+    urls.sort((a, b) => getSortScoreForUrl(a.url) - getSortScoreForUrl(b.url)),
+  );
+};
+
+export const getDataUrlsForPhotos = async (
+  photos: Photo[],
+  optimizedSuffix: Parameters<typeof getOptimizedPhotoUrlForSuffix>[1],
+  nextImageWidth: NextImageSize,
+  addBypassSecret: boolean,
+): Promise<{ id: string, urlData: string }[]> =>
+  Promise.all(photos
+    .map(async({ id, url }) => {
+      // Check for optimized image first
+      const optimizedUrl = await getSignedUrlForUrl(
+        getOptimizedPhotoUrlForSuffix(url, optimizedSuffix),
+        'GET',
+      );
+      const optimizedUrlData = await fetchBase64ImageFromUrl(optimizedUrl);
+
+      if (optimizedUrlData) {
+        return { id, urlData: optimizedUrlData };
+      } else {
+        // Fall back on `next/image` if optimized image is not available
+        const nextImageUrl = getOptimizedPhotoUrl({
+          imageUrl: url,
+          size: nextImageWidth,
+          addBypassSecret,
+        });
+        const nextImageUrlData = await fetchBase64ImageFromUrl(nextImageUrl);
+        return { id, urlData: nextImageUrlData };
+      }
+    }))
+    .then(urls => urls.every(({ urlData }) => Boolean(urlData))
+      ? urls as { id: string, urlData: string }[]
+      // If any url is undefined, return an empty array
+      : []);
+
+export type { StorageListResponse };

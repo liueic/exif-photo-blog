@@ -3,15 +3,18 @@ import {
   NextImageSize,
 } from '@/platforms/next-image';
 import {
+  ClientUploadOptions,
   generateFileNameWithId,
   getFileNamePartsFromStorageUrl,
-  getSignedUrlForUrl,
-  getStorageUrlsForPrefix,
   uploadFileFromClient,
-  ClientUploadOptions,
 } from '@/platforms/storage';
-import { Photo } from '..';
-import { fetchBase64ImageFromUrl } from '@/utility/image';
+
+/**
+ * Client-safe photo storage helpers.
+ *
+ * Operations that talk to a storage provider live in `./server` so that
+ * browser bundles never reach Node-only dependencies.
+ */
 
 const PREFIX_PHOTO = 'photo';
 const PREFIX_UPLOAD = 'upload';
@@ -77,12 +80,6 @@ export const getOptimizedUrlsFromPhotoUrl = (url: string) => {
 export const generateRandomFileNameForPhoto = () =>
   generateFileNameWithId(PREFIX_PHOTO);
 
-export const getStorageUploadUrls = () =>
-  getStorageUrlsForPrefix(`${PREFIX_UPLOAD}-`);
-
-export const getStoragePhotoUrls = () =>
-  getStorageUrlsForPrefix(`${PREFIX_PHOTO}-`);
-
 export const uploadTempPhotoFromClient = (
   file: File | Blob,
   extension = EXTENSION_DEFAULT,
@@ -138,52 +135,3 @@ const getTestOptimizedPhotoUrl = (url: string) =>
 
 export const doesPhotoUrlHaveOptimizedFiles = async (url: string) =>
   fetch(getTestOptimizedPhotoUrl(url)).then(res => res.ok);
-
-export const getStorageUrlsForPhoto = async ({ url }: Photo) => {
-  const getSortScoreForUrl = (url: string) => {
-    const { fileNameBase } = getFileNamePartsFromStorageUrl(url);
-    if (fileNameBase.endsWith('-sm')) { return 1; }
-    if (fileNameBase.endsWith('-md')) { return 2; }
-    if (fileNameBase.endsWith('-lg')) { return 3; }
-    return 0;
-  };
-
-  const { fileNameBase } = getFileNamePartsFromStorageUrl(url);
-
-  return getStorageUrlsForPrefix(fileNameBase).then(urls =>
-    urls.sort((a, b) => getSortScoreForUrl(a.url) - getSortScoreForUrl(b.url)),
-  );
-};
-
-export const getDataUrlsForPhotos = async (
-  photos: Photo[],
-  optimizedSuffix: OptimizedSuffix,
-  nextImageWidth: NextImageSize,
-  addBypassSecret: boolean,
-): Promise<{ id: string, urlData: string }[]> =>
-  Promise.all(photos
-    .map(async({ id, url }) => {
-      // Check for optimized image first
-      const optimizedUrl = await getSignedUrlForUrl(
-        getOptimizedPhotoUrlForSuffix(url, optimizedSuffix),
-        'GET',
-      );
-      const optimizedUrlData = await fetchBase64ImageFromUrl(optimizedUrl);
-
-      if (optimizedUrlData) {
-        return { id, urlData: optimizedUrlData };
-      } else {
-        // Fall back on `next/image` if optimized image is not available
-        const nextImageUrl = getOptimizedPhotoUrl({
-          imageUrl: url,
-          size: nextImageWidth,
-          addBypassSecret,
-        });
-        const nextImageUrlData = await fetchBase64ImageFromUrl(nextImageUrl);
-        return { id, urlData: nextImageUrlData };
-      }
-    }))
-    .then(urls => urls.every(({ urlData }) => Boolean(urlData))
-      ? urls as { id: string, urlData: string }[]
-      // If any url is undefined, return an empty array
-      : []);

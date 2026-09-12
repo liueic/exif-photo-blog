@@ -40,6 +40,12 @@ import Script from 'next/script';
 
 import '../tailwind.css';
 
+// Every route reads from the CloudBase document database at request time, and
+// the container build has no database credentials. Rendering on demand (with
+// the `unstable_cache` data layer in `src/*/cache.ts` still caching results)
+// keeps the build hermetic and avoids baking empty pages into the image.
+export const dynamic = 'force-dynamic';
+
 export const metadata: Metadata = {
   title: META_TITLE,
   description: META_DESCRIPTION,

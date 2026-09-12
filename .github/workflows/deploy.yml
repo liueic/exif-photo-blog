@@ -1,0 +1,76 @@
+# CI/CD: push to main → typecheck + tests → deploy to CloudBase Run
+#
+# One-time setup (see DEPLOY.md):
+#   GitHub repo → Settings → Secrets and variables → Actions:
+#     - TENCENTCLOUD_SECRETID  (Tencent Cloud API key id)
+#     - TENCENTCLOUD_SECRETKEY (Tencent Cloud API key secret)
+name: Deploy to CloudBase Run
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CLOUDBASE_ENV_ID: codebuddy-test-3gdqhtzxa73afca7
+  CLOUDBASE_RUN_SERVICE: exif-photo-blog
+  # Default access domain of the CloudBase Run service
+  CLOUDBASE_RUN_URL: exif-photo-blog-312660-9-1301730159.sh.run.tcloudbase.com
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      # pnpm version is read from the packageManager field in package.json
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Type check
+        run: node_modules/.bin/tsc --noEmit
+
+      - name: Test
+        # github.test.ts hits api.github.com anonymously and rate-limits on
+        # shared runner IPs; it is environmental, not a code gate
+        run: >
+          node_modules/.bin/jest --ci --watchAll=false
+          --testPathIgnorePatterns __tests__/github.test.ts
+
+      - name: Install CloudBase CLI
+        run: npm install -g @cloudbase/cli@3
+
+      - name: Log in to CloudBase
+        run: >
+          tcb login
+          --apiKeyId "${{ secrets.TENCENTCLOUD_SECRETID }}"
+          --apiKey "${{ secrets.TENCENTCLOUD_SECRETKEY }}"
+
+      - name: Deploy service
+        # Uploads the source (including the Dockerfile) and builds remotely;
+        # NEXT_PUBLIC_* build args use the Dockerfile defaults for this env
+        run: >
+          tcb cloudrun deploy
+          -e "$CLOUDBASE_ENV_ID"
+          -s "$CLOUDBASE_RUN_SERVICE"
+          --port 3000
+          --force
+          --wait
+
+      - name: Verify deployment
+        run: >
+          curl -fsS --retry 5 --retry-delay 10 --retry-connrefused
+          "https://${CLOUDBASE_RUN_URL}/api/health"
+          | tee /dev/stderr | grep -q '"ready":true'

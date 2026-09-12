@@ -9,6 +9,8 @@ import { getIBMPlexMono } from '@/app/font';
 import { getImageResponseCacheControlHeaders } from '@/image-response/cache';
 import { ImageResponse } from 'next/og';
 
+export const dynamic = 'force-dynamic';
+
 export async function GET() {
   const [
     photos,

@@ -2,7 +2,7 @@ import { pathForPhoto } from '@/app/path';
 import LinkWithStatus from '@/components/LinkWithStatus';
 import { Photo } from '@/photo';
 import { getPhotoUrls } from '@/photo/query';
-import { getStorageUrlsForPhoto } from '@/photo/storage';
+import { getStorageUrlsForPhoto } from '@/photo/storage/server';
 
 export default async function AdminStoragePage() {
   const _urls = await getPhotoUrls({ limit: 1000, hidden: 'include' });

@@ -2,7 +2,7 @@ import { Suspense } from 'react';
 import { APP_CONFIGURATION } from '@/app/config';
 import AdminAppConfigurationClient from './AdminAppConfigurationClient';
 import AdminAppConfigurationServer from './AdminAppConfigurationServer';
-import { generateAuthSecret } from '@/auth';
+import { generateAuthSecret } from '@/auth/server';
 
 export default async function AdminAppConfiguration({
   simplifiedView,

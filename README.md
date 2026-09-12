@@ -105,7 +105,18 @@ See FAQ for [limitations of local development](#can-i-work-locally-without-acces
 
 ### AI text generation
 
-To auto-generate text descriptions of photos, configure a provider. Vercel AI Gateway is the recommended path; direct OpenAI (or an OpenAI-compatible endpoint) is available as an alternate. If both variables are set, `OPENAI_SECRET_KEY` takes precedence.
+To auto-generate text descriptions of photos, configure a provider. On Tencent CloudBase, CloudBase AI is the recommended path (see [DEPLOY.md](/DEPLOY.md)); Vercel AI Gateway is the recommended path on Vercel; direct OpenAI (or an OpenAI-compatible endpoint) is available as an alternate. When multiple variables are set, `OPENAI_SECRET_KEY` takes precedence over `CLOUDBASE_AI_API_KEY`, which takes precedence over `AI_GATEWAY_MODEL`.
+
+#### CloudBase AI
+
+1. Enable a vision model in the CloudBase console (**AI → 模型管理**), e.g. `glm-5v-turbo` — the model must support image input
+2. Create an environment API key ([env apikey console](https://tcb.cloud.tencent.com/dev#/env/apikey)) and store it in `CLOUDBASE_AI_API_KEY`
+   - The base URL is derived from `CLOUDBASE_ENV` automatically
+   - Falls back to `CLOUDBASE_APIKEY` (the storage credential) when unset
+   - Billing uses the environment's resource points
+3. Optionally set `CLOUDBASE_AI_MODEL` to choose a specific vision model (defaults to `glm-5v-turbo`)
+4. Add [rate limiting](#rate-limiting) (_recommended_)
+5. Configure auto-generated fields (optional, see below for instructions)
 
 #### Vercel AI Gateway
 

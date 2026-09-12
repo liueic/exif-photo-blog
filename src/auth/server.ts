@@ -1,6 +1,18 @@
+import { randomBytes } from 'crypto';
 import { isPathProtected } from '@/app/path';
 import NextAuth, { User } from 'next-auth';
 import Credentials from 'next-auth/providers/credentials';
+
+/**
+ * Generates a new auth secret locally.
+ *
+ * The template previously fetched this from `generate-secret.vercel.app`,
+ * which tied the app to a Vercel endpoint and broke container builds where
+ * that host is unreachable. Generating locally is equally strong and has no
+ * network dependency.
+ */
+export const generateAuthSecret = () =>
+  Promise.resolve(randomBytes(32).toString('base64url'));
 
 export const {
   handlers: { GET, POST },

@@ -3,7 +3,7 @@
 import { Photo } from '@/photo';
 import { NextImageSize } from '@/platforms/next-image';
 import { IS_PREVIEW } from '@/app/config';
-import { getDataUrlsForPhotos } from '@/photo/storage';
+import { getDataUrlsForPhotos } from '@/photo/storage/server';
 
 export default async function ImagePhotoGrid({
   photos,

@@ -4,7 +4,7 @@ import { formatFeedRssXml } from '@/feed/rss';
 import { PROGRAMMATIC_QUERY_OPTIONS } from '@/feed';
 
 // Cache for 24 hours
-export const revalidate = 86_400;
+export const dynamic = 'force-dynamic';
 
 export async function GET() {
   if (SITE_FEEDS_ENABLED) {

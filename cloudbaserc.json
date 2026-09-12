@@ -1,0 +1,6 @@
+{
+  "envId": "codebuddy-test-3gdqhtzxa73afca7",
+  "cloudrun": {
+    "name": "exif-photo-blog"
+  }
+}

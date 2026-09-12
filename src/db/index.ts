@@ -6,24 +6,19 @@ import { APP_DEFAULT_SORT_BY, SortBy } from '@/photo/sort';
 import { Album } from '@/album';
 import { getPathComponents } from '@/app/path';
 import { getAlbumFromSlug } from '@/album/query';
-import { isTagPrivate } from '@/tag';
 import { getPhotoCount } from '@/photo/query';
+import { isTagPrivate } from '@/tag';
+import {
+  COLLECTION_PHOTOS,
+  getCommand,
+  getDb,
+  getRegExp,
+} from '@/platforms/cloudbase';
 
 export const GENERATE_STATIC_PARAMS_LIMIT = 1000;
 export const PHOTO_DEFAULT_LIMIT = 100;
-
-// These must mirror utility/string.ts parameterization
-const CHARACTERS_TO_REMOVE = [',', '/'];
-const CHARACTERS_TO_REPLACE = ['+', '&', '|', ':', '_', ' '];
-
-const parameterizeForDb = (field: string) =>
-  `REGEXP_REPLACE(
-    REGEXP_REPLACE(
-      LOWER(TRIM(${field})),
-      '[${CHARACTERS_TO_REMOVE.join('')}]', '', 'g'
-    ),
-    '[${CHARACTERS_TO_REPLACE.join('')}]', '-', 'g'
-  )`;
+/** A single CloudBase query can return at most 1000 documents */
+export const CLOUDBASE_QUERY_LIMIT = 1000;
 
 export type PhotoQueryOptions = {
   sortBy?: SortBy
@@ -47,15 +42,31 @@ export type PhotoQueryOptions = {
 export const areOptionsSensitive = (options: PhotoQueryOptions) =>
   options.hidden === 'include' || options.hidden === 'only';
 
-export const getJoinsFromOptions = (options: PhotoQueryOptions) =>
-  options.album
-    ? 'JOIN album_photo ap ON ap.photo_id = p.id'
-    : undefined;
+// QUERY CONDITIONS
+
+export type WhereClause = Record<string, unknown>;
+
+export const isEmptyWhere = (where: WhereClause) =>
+  Object.keys(where).length === 0;
+
+/** Combines repeated conditions on the same field (e.g. a date range) */
+export const applyWhere = (
+  where: WhereClause,
+  field: string,
+  value: unknown,
+) => {
+  const existing = where[field];
+  where[field] = existing === undefined
+    ? value
+    : getCommand().and(existing as any, value as any);
+};
+
+export const escapeRegExp = (value: string) =>
+  value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 export const getWheresFromOptions = (
   options: PhotoQueryOptions,
-  initialValuesIndex = 1,
-) => {
+): WhereClause => {
   const {
     hidden = 'exclude',
     excludeFromFeeds,
@@ -64,7 +75,6 @@ export const getWheresFromOptions = (
     updatedBefore,
     query,
     maximumAspectRatio,
-    recent,
     year,
     album,
     tag,
@@ -76,198 +86,203 @@ export const getWheresFromOptions = (
     photoIds,
   } = options;
 
-  const wheres = [] as string[];
-  const wheresValues = [] as (string | number)[];
-  let valuesIndex = initialValuesIndex;
+  const _ = getCommand();
+  const where: WhereClause = {};
 
   switch (hidden) {
     case 'exclude':
-      wheres.push('hidden IS NOT TRUE');
+      // `hidden IS NOT TRUE` — also matches documents missing the field
+      where.hidden = _.neq(true);
       break;
     case 'only':
-      wheres.push('hidden IS TRUE');
+      where.hidden = true;
       break;
   }
 
   if (excludeFromFeeds) {
-    wheres.push('exclude_from_feeds IS NOT TRUE');
+    where.excludeFromFeeds = _.neq(true);
   }
   if (takenBefore) {
-    wheres.push(`taken_at < $${valuesIndex++}`);
-    wheresValues.push(takenBefore.toISOString());
+    applyWhere(where, 'takenAt', _.lt(takenBefore));
   }
   if (takenAfterInclusive) {
-    wheres.push(`taken_at >= $${valuesIndex++}`);
-    wheresValues.push(takenAfterInclusive.toISOString());
+    applyWhere(where, 'takenAt', _.gte(takenAfterInclusive));
   }
   if (updatedBefore) {
-    wheres.push(`updated_at < $${valuesIndex++}`);
-    wheresValues.push(updatedBefore.toISOString());
+    applyWhere(where, 'updatedAt', _.lt(updatedBefore));
   }
   if (query) {
-    // eslint-disable-next-line max-len
-    wheres.push(`CONCAT(title, ' ', caption, ' ', semantic_description) ILIKE $${valuesIndex++}`);
-    wheresValues.push(`%${query.toLocaleLowerCase()}%`);
+    // Replaces
+    // `CONCAT(title, ' ', caption, ' ', semantic_description) ILIKE ...`
+    // via a denormalized, lowercased `searchText` field
+    where.searchText = getRegExp(
+      escapeRegExp(query.toLocaleLowerCase()),
+      'i',
+    );
   }
   if (maximumAspectRatio) {
-    wheres.push(`aspect_ratio <= $${valuesIndex++}`);
-    wheresValues.push(maximumAspectRatio);
-  }
-  if (recent) {
-    // Newest upload must be within past 2 weeks
-    // eslint-disable-next-line max-len
-    wheres.push('(SELECT MAX(created_at) FROM photos) >= (now() - INTERVAL \'14 days\')');
-    // Selects must be within 1 week of newest upload
-    // eslint-disable-next-line max-len
-    wheres.push('created_at >= (SELECT MAX(created_at) - INTERVAL \'7 days\' FROM photos)');
+    where.aspectRatio = _.lte(maximumAspectRatio);
   }
   if (year) {
-    wheres.push(`EXTRACT(YEAR FROM taken_at) = $${valuesIndex++}`);
-    wheresValues.push(year);
-  }
-  if (camera?.make) {
-    wheres.push(`${parameterizeForDb('make')}=$${valuesIndex++}`);
-    wheresValues.push(parameterize(camera.make));
-  }
-  if (camera?.model) {
-    wheres.push(`${parameterizeForDb('model')}=$${valuesIndex++}`);
-    wheresValues.push(parameterize(camera.model));
-  }
-  if (lens?.make) {
-    wheres.push(`${parameterizeForDb('lens_make')}=$${valuesIndex++}`);
-    wheresValues.push(parameterize(lens.make));
-  }
-  if (lens?.model) {
-    wheres.push(`${parameterizeForDb('lens_model')}=$${valuesIndex++}`);
-    // Ensure unique queries for lenses missing makes
-    if (!lens.make) { wheres.push('lens_make IS NULL'); }
-    wheresValues.push(parameterize(lens.model));
-  }
-  if (album) {
-    wheres.push(`album_id=$${valuesIndex++}`);
-    wheresValues.push(album.id);
-  }
-  if (tag) {
-    wheres.push(`$${valuesIndex++}=ANY(tags)`);
-    wheresValues.push(tag);
-  }
-  if (film) {
-    wheres.push(`film=$${valuesIndex++}`);
-    wheresValues.push(film);
-  }
-  if (recipe) {
-    wheres.push(`recipe_title=$${valuesIndex++}`);
-    wheresValues.push(recipe);
-  }
-  if (focal) {
-    wheres.push(`focal_length=$${valuesIndex++}`);
-    wheresValues.push(focal);
-  }
-  if (photoIds && photoIds.length > 0) {
-    wheres.push(`id=ANY($${valuesIndex++})`);
-    wheresValues.push(convertArrayToPostgresString(photoIds) ?? '');
+    // Replaces `EXTRACT(YEAR FROM taken_at) = ...`. The category is a string
+    // in the URL, while `takenAtYear` is stored as a number.
+    const yearNumber = parseInt(year, 10);
+    if (!Number.isNaN(yearNumber)) {
+      where.takenAtYear = yearNumber;
+    }
   }
 
-  return {
-    wheres: wheres.length > 0
-      ? `WHERE ${wheres.join(' AND ')}`
-      : '',
-    wheresValues,
-    lastValuesIndex: valuesIndex,
-  };
+  // Camera/lens matching uses denormalized, parameterized fields which replace
+  // the `REGEXP_REPLACE(...)` normalization previously performed by Postgres
+  const cameraMake = camera?.make ? parameterize(camera.make) : undefined;
+  if (cameraMake) { where.makeN = cameraMake; }
+
+  const cameraModel = camera?.model ? parameterize(camera.model) : undefined;
+  if (cameraModel) { where.modelN = cameraModel; }
+
+  const lensMake = lens?.make ? parameterize(lens.make) : undefined;
+  if (lensMake) { where.lensMakeN = lensMake; }
+
+  const lensModel = lens?.model ? parameterize(lens.model) : undefined;
+  if (lensModel) {
+    where.lensModelN = lensModel;
+    // Ensure unique queries for lenses missing makes (`lens_make IS NULL`)
+    if (!lensMake) { where.lensMakeN = ''; }
+  }
+
+  if (album) { where.albumIds = album.id; }
+  if (tag) { where.tags = tag; }
+  if (film) { where.film = film; }
+  if (recipe) { where.recipeTitle = recipe; }
+  if (focal) { where.focalLength = focal; }
+  if (photoIds && photoIds.length > 0) { where._id = _.in(photoIds); }
+
+  return where;
 };
 
-export const getOrderByFromOptions = (options: PhotoQueryOptions) => {
+// ORDERING
+
+export type OrderByClause = [string, 'asc' | 'desc'][];
+
+export const getOrderByFromOptions = (
+  options: PhotoQueryOptions,
+): OrderByClause => {
   const {
     sortBy = APP_DEFAULT_SORT_BY,
     sortWithPriority,
-    limit = PHOTO_DEFAULT_LIMIT,
   } = options;
+
+  // Mirrors Postgres' `NULLS LAST` for ascending priority ordering
+  const priority: OrderByClause =
+    sortWithPriority ? [['priorityOrderSort', 'asc']] : [];
 
   switch (sortBy) {
     case 'takenAt':
-      return sortWithPriority
-        ? 'ORDER BY priority_order ASC, taken_at DESC'
-        : 'ORDER BY taken_at DESC';
+      return [...priority, ['takenAt', 'desc']];
     case 'takenAtAsc':
-      return sortWithPriority
-        ? 'ORDER BY priority_order ASC, taken_at ASC'
-        : 'ORDER BY taken_at ASC';
+      return [...priority, ['takenAt', 'asc']];
     case 'createdAt':
-      return sortWithPriority
-        ? 'ORDER BY priority_order ASC, created_at DESC'
-        : 'ORDER BY created_at DESC';
+      return [...priority, ['createdAt', 'desc']];
     case 'createdAtAsc':
-      return sortWithPriority
-        ? 'ORDER BY priority_order ASC, created_at ASC'
-        : 'ORDER BY created_at ASC';
-      // Add date sort to account for photos with same color sort
+      return [...priority, ['createdAt', 'asc']];
     case 'color':
-      return sortWithPriority
-        ? 'ORDER BY priority_order ASC, color_sort DESC, taken_at DESC'
-        : 'ORDER BY color_sort DESC, taken_at DESC';
+      // Date sort accounts for photos with the same color sort
+      return [...priority, ['colorSort', 'desc'], ['takenAt', 'desc']];
     case 'colorAsc':
-      return sortWithPriority
-        ? 'ORDER BY priority_order ASC, color_sort ASC, taken_at ASC'
-        : 'ORDER BY color_sort ASC, taken_at ASC';
-    case 'random': {
-      // Stable newest-first stride, 2× limit so hits are spaced further apart
-      const stride = Math.max(2, (Math.floor(Number(limit)) || 1) * 2);
-      return [
-        'ORDER BY',
-        `(ROW_NUMBER() OVER (ORDER BY taken_at DESC, id) - 1) % ${stride},`,
-        'taken_at DESC, id',
-      ].join(' ');
-    }
+      return [...priority, ['colorSort', 'asc'], ['takenAt', 'asc']];
+    case 'random':
+      // Recency ordering only; the stable stride is applied in application
+      // code (see `applyRandomStrideOrder`) because the document store has no
+      // window functions
+      return [['takenAt', 'desc'], ['_id', 'asc']];
   }
 };
 
+export const getRandomStride = (limit: number) =>
+  Math.max(2, (Math.floor(Number(limit)) || 1) * 2);
+
+/**
+ * Replaces the original SQL window function:
+ *
+ * `ORDER BY (ROW_NUMBER() OVER (ORDER BY taken_at DESC, id) - 1) % stride,
+ *           taken_at DESC, id`
+ *
+ * Expects input already ordered by `taken_at DESC, id`.
+ */
+export const applyRandomStrideOrder = <T>(
+  items: T[],
+  limit: number,
+): T[] => {
+  const stride = getRandomStride(limit);
+  return items
+    .map((item, index) => ({ item, index }))
+    .sort((a, b) =>
+      (a.index % stride) - (b.index % stride) || a.index - b.index)
+    .map(({ item }) => item);
+};
+
+// PAGING
+
 export const getLimitAndOffsetFromOptions = (
   options: PhotoQueryOptions,
-  initialValuesIndex = 1,
 ) => {
   const {
     limit = PHOTO_DEFAULT_LIMIT,
     offset = 0,
   } = options;
 
-  let valuesIndex = initialValuesIndex;
-
   return {
-    limitAndOffset: `LIMIT $${valuesIndex++} OFFSET $${valuesIndex++}`,
-    limitAndOffsetValues: [limit, offset],
+    limit: Math.min(
+      Math.max(Math.floor(limit) || 0, 0),
+      CLOUDBASE_QUERY_LIMIT,
+    ),
+    offset: Math.max(Math.floor(offset) || 0, 0),
   };
 };
 
-export const convertArrayToPostgresString = (
-  array?: string[],
-  type: 'braces' | 'brackets' | 'parentheses' = 'braces', 
-) => array
-  ? type === 'braces'
-    ? `{${array.join(',')}}`
-    : type === 'brackets'
-      ? `[${array.map(i => `'${i}'`).join(',')}]`
-      : `(${array.map(i => `'${i}'`).join(',')})`
-  : null;
+// 'RECENT' WINDOW
 
-export const generateManyToManyValues = (idsA: string[], idsB: string[]) => {
-  const pairs: string[][] = [];
+export type RecentWindow =
+  | { excluded: true }
+  | { excluded: false, createdAtGte: Date };
 
-  for (const idA of idsA) {
-    for (const idB of idsB) {
-      pairs.push([idA, idB]);
-    }
+const TWO_WEEKS_MS = 14 * 24 * 60 * 60 * 1000;
+const ONE_WEEK_MS = 7 * 24 * 60 * 60 * 1000;
+
+/**
+ * Replaces the SQL subqueries:
+ *
+ * - `(SELECT MAX(created_at) FROM photos) >= (now() - INTERVAL '14 days')`
+ * - `created_at >= (SELECT MAX(created_at) - INTERVAL '7 days' FROM photos)`
+ */
+export const getRecentWindow = async (): Promise<RecentWindow> => {
+  const { data } = await getDb()
+    .collection(COLLECTION_PHOTOS)
+    .field({ _id: true, createdAt: true })
+    .orderBy('createdAt', 'desc')
+    .limit(1)
+    .get();
+
+  const newestCreatedAt = data?.[0]?.createdAt as Date | undefined;
+
+  if (
+    !newestCreatedAt ||
+    new Date(newestCreatedAt).getTime() < Date.now() - TWO_WEEKS_MS
+  ) {
+    return { excluded: true };
   }
-  const valueString = 'VALUES ' + pairs.map((_, index) =>
-    `($${index * 2 + 1},$${index * 2 + 2})`).join(',');
 
-  const values = pairs.flat();
-  
   return {
-    valueString,
-    values,
+    excluded: false,
+    createdAtGte: new Date(new Date(newestCreatedAt).getTime() - ONE_WEEK_MS),
   };
 };
+
+// DOCUMENT PARSING
+
+export { parseDocument, parseDocuments } from './document';
+
+// PATH HELPERS
 
 export const getPhotoOptionsCountForPath = async (
   path: string,
@@ -287,10 +302,13 @@ export const getPhotoOptionsCountForPath = async (
 
   const count = await getPhotoCount(options);
 
+  // A single request cannot exceed the CloudBase per-query document cap, so
+  // the caller pages through the result set rather than asking for `count`
+  // documents in one go
   return {
     options: {
       ...options,
-      limit: count,
+      limit: Math.min(count, CLOUDBASE_QUERY_LIMIT),
     },
     count,
   };

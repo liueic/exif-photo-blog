@@ -11,7 +11,7 @@ import { getAppText } from '@/i18n/state/server';
 import { SHOW_RECENTS } from '@/app/config';
 import { ImageResponse } from 'next/og';
 
-export const dynamic = 'force-static';
+export const dynamic = 'force-dynamic';
 
 export async function GET() {
   const [

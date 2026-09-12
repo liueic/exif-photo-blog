@@ -48,13 +48,14 @@ import { IoLink } from 'react-icons/io5';
 export default function AdminAppConfigurationClient({
   // Storage
   hasDatabase,
-  isPostgresSslEnabled,
+  cloudbaseEnv,
   hasRedisStorage,
   hasStorageProvider,
   hasVercelBlobStorage,
   hasCloudflareR2Storage,
   hasAwsS3Storage,
   hasMinioStorage,
+  hasCloudbaseStorage,
   hasMultipleStorageProviders,
   currentStorage,
   // Auth
@@ -88,6 +89,9 @@ export default function AdminAppConfigurationClient({
   // AI
   isVercelDeployment,
   hasOpenaiSecretKey,
+  hasCloudbaseAiApiKey,
+  hasCloudbaseAiBaseUrl,
+  cloudbaseAiModel,
   hasAiGatewayModel,
   aiActiveTextGenerationProvider,
   isAiTextGenerationEnabled,
@@ -307,19 +311,19 @@ export default function AdminAppConfigurationClient({
               ? renderSubStatus(
                 'checked',
                 // eslint-disable-next-line max-len
-                `Postgres: connected${!isPostgresSslEnabled ? ' (SSL disabled)' : ''}`,
+                `CloudBase: connected${cloudbaseEnv ? ` (${cloudbaseEnv})` : ''}`,
               )
               : renderSubStatus('missing', <>
-                Postgres:
+                CloudBase:
                 {' '}
                 <AdminLink
-                  href="https://vercel.com/docs/postgres"
+                  href="https://console.cloud.tencent.com/tcb"
                   externalIcon
                 >
-                  create database
+                  create environment
                 </AdminLink>
                 {' '}
-                and connect to project
+                and set <code>CLOUDBASE_ENV</code>
               </>)}
           </ChecklistRow>
           <ChecklistRow
@@ -389,6 +393,18 @@ export default function AdminAppConfigurationClient({
                     externalIcon
                   >
                     setup MinIO server
+                  </AdminLink>
+                </>)}
+              {hasCloudbaseStorage
+                ? renderSubStatus('checked', 'CloudBase Storage: connected')
+                : renderSubStatus('optional', <>
+                  {labelForStorage('cloudbase-storage')}:
+                  {' '}
+                  <AdminLink
+                    href="https://console.cloud.tencent.com/tcb"
+                    externalIcon
+                  >
+                    use environment storage
                   </AdminLink>
                 </>)}
             </div>
@@ -551,6 +567,50 @@ export default function AdminAppConfigurationClient({
               : ['AI_GATEWAY_MODEL', 'AI_GATEWAY_API_KEY'])}
           </ChecklistRow>
           <ChecklistRow
+            title={aiActiveTextGenerationProvider === 'cloudbase-ai'
+              && isAnalyzingConfiguration
+              ? 'Testing CloudBase AI connection'
+              : 'CloudBase AI'}
+            status={aiActiveTextGenerationProvider === 'cloudbase-ai'}
+            showWarning={hasCloudbaseAiApiKey
+              && aiActiveTextGenerationProvider !== 'cloudbase-ai'}
+            isPending={aiActiveTextGenerationProvider === 'cloudbase-ai'
+              && isAnalyzingConfiguration}
+            optional
+          >
+            {aiError
+              && aiActiveTextGenerationProvider === 'cloudbase-ai'
+              && renderError({
+                connection: { provider: 'CloudBase AI', error: aiError},
+              })}
+            Generate AI text descriptions through the
+            {' '}
+            {renderLink(
+              'https://docs.cloudbase.net/ai/model/openai-sdk-access',
+              'CloudBase AI',
+            )}
+            {' '}
+            gateway, billed via environment resource points. The base URL
+            is derived from CLOUDBASE_ENV; the key falls back to
+            CLOUDBASE_APIKEY when CLOUDBASE_AI_API_KEY is unset. Defaults
+            to the bundled text model
+            {' '}
+            {'("hy3")'}
+            ; photo description additionally requires a vision model
+            {' '}
+            {'(e.g. "glm-5v-turbo")'}
+            {' '}
+            enabled in the CloudBase console (AI → 模型管理) — with a
+            text-only model, AI field generation fails gracefully while
+            uploads continue.
+            {!hasCloudbaseAiBaseUrl && ' CLOUDBASE_ENV is required.'}
+            {cloudbaseAiModel && ` Using model: ${cloudbaseAiModel}.`}
+            {renderEnvVars([
+              { variable: 'CLOUDBASE_AI_API_KEY' },
+              { variable: 'CLOUDBASE_AI_MODEL', optional: true },
+            ])}
+          </ChecklistRow>
+          <ChecklistRow
             title={hasOpenaiSecretKey && isAnalyzingConfiguration
               ? 'Testing OpenAI connection'
               : 'OpenAI (legacy)'}
@@ -563,7 +623,8 @@ export default function AdminAppConfigurationClient({
               && renderError({
                 connection: { provider: 'OpenAI', error: aiError},
               })}
-            Takes precedence over AI Gateway when configured.
+            Takes precedence over CloudBase AI and AI Gateway when
+            configured.
             Optionally override the model
             {' '}
             {'(set OPENAI_MODEL to \'compatible\' to use gpt-4o)'}

@@ -43,3 +43,15 @@ next-env.d.ts
 /backup
 /app/restore
 temp.jpg
+
+# agent tooling state (local IDE/agent-specific, not part of the app)
+/.agents/
+/.claude/
+/.codebuddy/
+/.kiro/
+/.mimosa/
+/.pi/
+/.qoder/
+/.trae/
+/.zcode/
+skills-lock.json

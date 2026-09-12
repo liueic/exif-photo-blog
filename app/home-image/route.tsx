@@ -9,7 +9,7 @@ import { getImageResponseCacheControlHeaders } from '@/image-response/cache';
 import { APP_OG_IMAGE_QUERY_OPTIONS } from '@/feed';
 import { ImageResponse } from 'next/og';
 
-export const dynamic = 'force-static';
+export const dynamic = 'force-dynamic';
 
 export async function GET() {
   const [

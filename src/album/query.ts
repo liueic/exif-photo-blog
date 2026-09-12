@@ -1,114 +1,120 @@
-import { safelyQuery } from '@/db/query';
-import { query, sql } from '@/platforms/postgres';
-import { generateManyToManyValues } from '@/db';
+import { randomUUID } from 'crypto';
+import {
+  COLLECTION_ALBUMS,
+  COLLECTION_PHOTOS,
+  getCommand,
+  getDb,
+} from '@/platforms/cloudbase';
 import { Album, Albums, parseAlbumFromDb } from '.';
+import { safelyQuery } from '@/db/query';
+import {
+  buildAlbumInsertDocument,
+  buildAlbumUpdateDocument,
+} from '@/db/derive';
+import {
+  parseAggregateList,
+  parseDocument,
+  parseDocuments,
+} from '@/db/document';
+import { fetchAllPages } from '@/db/paging';
 
-export const createAlbumsTable = () =>
-  sql`
-    CREATE TABLE IF NOT EXISTS albums (
-      id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-      title VARCHAR(255) NOT NULL,
-      slug VARCHAR(255) UNIQUE NOT NULL,
-      subhead TEXT,
-      description TEXT,
-      location JSONB,
-      updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-      created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-    )
-  `;
-
-export const createAlbumPhotoTable = () =>
-  sql`
-    CREATE TABLE IF NOT EXISTS album_photo (
-      album_id uuid NOT NULL REFERENCES albums(id) ON DELETE CASCADE,
-      photo_id VARCHAR(8) NOT NULL REFERENCES photos(id) ON DELETE CASCADE,
-      sort_order SMALLINT NOT NULL DEFAULT 0,
-      PRIMARY KEY (album_id, photo_id)
-    )
-  `;
+const albumsCollection = () => getDb().collection(COLLECTION_ALBUMS);
+const photosCollection = () => getDb().collection(COLLECTION_PHOTOS);
 
 export const insertAlbum = (album: Omit<Album, 'id'>) =>
-  safelyQuery(() => sql`
-    INSERT INTO albums (
-      title,
-      slug,
-      subhead,
-      description,
-      location
-    ) VALUES (
-      ${album.title},
-      ${album.slug},
-      ${album.subhead},
-      ${album.description},
-      ${album.location
-        ? JSON.stringify(album.location)
-        : null}
-    )
-    RETURNING id
-  `.then(({ rows }) => rows[0]?.id as string)
-  , 'insertAlbum');
+  safelyQuery(async () => {
+    // Postgres generated this via `gen_random_uuid()`
+    const id = randomUUID();
+    await albumsCollection().doc(id).set(buildAlbumInsertDocument(album));
+    return id;
+  }, 'insertAlbum');
 
 export const updateAlbum = (album: Album) =>
-  safelyQuery(() => sql`
-    UPDATE albums SET
-      title=${album.title},
-      slug=${album.slug},
-      subhead=${album.subhead},
-      description=${album.description},
-      location=${album.location
-        ? JSON.stringify(album.location)
-        : null},
-      updated_at=${(new Date()).toISOString()}
-    WHERE id=${album.id}
-  `, 'updateAlbum');
+  safelyQuery(async () => {
+    await albumsCollection().doc(album.id)
+      .update(buildAlbumUpdateDocument(album));
+  }, 'updateAlbum');
 
 export const getAlbumFromSlug = (slug: string) =>
-  safelyQuery(() => sql<Album>`
-    SELECT * FROM albums WHERE slug=${slug}
-  `.then(({ rows }) => rows[0] ? parseAlbumFromDb(rows[0]) : undefined)
-  , 'getAlbumFromSlug');
+  safelyQuery(async () => {
+    const { data } = await albumsCollection()
+      .where({ slug })
+      .limit(1)
+      .get();
+    const document = parseDocument<Record<string, unknown>>(data?.[0]);
+    return document ? parseAlbumFromDb(document) : undefined;
+  }, 'getAlbumFromSlug');
+
+export const getAlbum = (id: string) =>
+  safelyQuery(async () => {
+    const { data } = await albumsCollection().doc(id).get();
+    const document = parseDocument<Record<string, unknown>>(
+      Array.isArray(data) ? data[0] : data,
+    );
+    return document ? parseAlbumFromDb(document) : undefined;
+  }, 'getAlbum');
 
 export const deleteAlbum = (id: string) =>
-  safelyQuery(() => sql`
-    DELETE FROM albums WHERE id=${id}
-  `, 'deleteAlbum');
+  safelyQuery(async () => {
+    await albumsCollection().doc(id).delete();
+    // Replaces `ON DELETE CASCADE` on the album_photo join table
+    await photosCollection()
+      .where({ albumIds: id })
+      .update({ albumIds: getCommand().pull(id) });
+  }, 'deleteAlbum');
 
 export const getAlbumsWithMeta = () =>
-  safelyQuery(() => sql`
-    SELECT 
-      a.*,
-      COALESCE(COUNT(ap.photo_id), 0) as count
-    FROM albums a
-    LEFT JOIN album_photo ap ON a.id = ap.album_id
-    GROUP BY a.id
-    ORDER BY a.created_at DESC
-  `.then(({ rows }): Albums => rows.map(({
-      count,
-      ...album
-    }) => ({
-      album: parseAlbumFromDb(album),
-      count: parseInt(count, 10),
-      lastModified: album.updated_at as Date,
-    })))
-  , 'getAlbumsWithMeta');
+  safelyQuery(async () => {
+    const { data } = await albumsCollection()
+      .orderBy('createdAt', 'desc')
+      .limit(1000)
+      .get();
+
+    return parseDocuments<Record<string, any>>(data)
+      .map((album): Albums[number] => ({
+        album: parseAlbumFromDb(album),
+        // Denormalized count replaces the previous LEFT JOIN + GROUP BY
+        count: parseInt(`${album.photoCount ?? 0}`, 10),
+        lastModified: album.updatedAt as Date,
+      }));
+  }, 'getAlbumsWithMeta');
 
 export const clearPhotoAlbumIds = (photoId: string) =>
-  safelyQuery(() => sql`
-    DELETE FROM album_photo WHERE photo_id=${photoId}
-  `, 'clearPhotoAlbumIds');
+  safelyQuery(async () => {
+    const { data } = await photosCollection()
+      .doc(photoId)
+      .field({ _id: true, albumIds: true })
+      .get();
 
+    const document = Array.isArray(data) ? data[0] : data;
+    const previousAlbumIds = (document?.albumIds ?? []) as string[];
+
+    await photosCollection().doc(photoId).update({ albumIds: [] });
+    await syncAlbumsForIds(previousAlbumIds);
+  }, 'clearPhotoAlbumIds');
+
+/**
+ * Assigns photos to albums.
+ *
+ * The previous `ON CONFLICT (album_id, photo_id) DO NOTHING` insert is
+ * replaced by `$addToSet`, which is likewise idempotent.
+ */
 export const addPhotoAlbumIds = (photoIds: string[], albumIds: string[]) => {
   if (photoIds.length > 0 && albumIds.length > 0) {
-    const {
-      valueString,
-      values,
-    } = generateManyToManyValues(albumIds, photoIds);
-    return safelyQuery(() => query(`
-      INSERT INTO album_photo (album_id, photo_id)
-      ${valueString}
-      ON CONFLICT (album_id, photo_id) DO NOTHING
-    `, values)
-    , 'addPhotoAlbumIds');
+    return safelyQuery(async () => {
+      const _ = getCommand();
+
+      await Promise.all(photoIds.flatMap(photoId =>
+        albumIds.map(albumId =>
+          photosCollection()
+            .doc(photoId)
+            // `$addToSet` accepts a single value; multiple values would be
+            // stored as one array element
+            .update({ albumIds: _.addToSet(albumId) })
+            .catch(() => undefined))));
+
+      await syncAlbumsForIds(albumIds);
+    }, 'addPhotoAlbumIds');
   }
 };
 
@@ -116,18 +122,83 @@ export const addPhotoAlbumId = (photoId: string, albumId: string) =>
   addPhotoAlbumIds([photoId], [albumId]);
 
 export const getAlbumTitlesForPhoto = (photoId: string) =>
-  safelyQuery(() => sql<{ title: string }>`
-    SELECT a.title FROM albums a
-    JOIN album_photo ap ON a.id = ap.album_id
-    WHERE ap.photo_id=${photoId}
-  `.then(({ rows }) => rows.map(({ title }) => title))
-  , 'getAlbumTitlesForPhoto');
+  safelyQuery(async () => {
+    const { data } = await photosCollection()
+      .doc(photoId)
+      .field({ _id: true, albumIds: true })
+      .get();
+
+    const document = Array.isArray(data) ? data[0] : data;
+    const albumIds = (document?.albumIds ?? []) as string[];
+
+    if (albumIds.length === 0) { return []; }
+
+    const { data: albums } = await albumsCollection()
+      .where({ _id: getCommand().in(albumIds) })
+      // Preserve the stored album order rather than index order
+      .field({ _id: true, title: true })
+      .limit(albumIds.length)
+      .get();
+
+    const titlesById = new Map<string, string>(
+      (albums ?? []).map(({ _id, title }) => [_id as string, title as string]),
+    );
+
+    return albumIds
+      .map(albumId => titlesById.get(albumId))
+      .filter((title): title is string => Boolean(title));
+  }, 'getAlbumTitlesForPhoto');
 
 export const getTagsForAlbum = (albumId: string) =>
-  safelyQuery(() => sql`
-    SELECT DISTINCT unnest(p.tags) as tag
-    FROM photos p
-    LEFT JOIN album_photo ap ON p.id = ap.photo_id
-    WHERE album_id=${albumId}
-  `.then(({ rows }) => rows.map(({ tag }) => tag))
-  , 'getTagsForAlbum');
+  safelyQuery(async () => {
+    // Reads the denormalized tag list rather than re-joining photos
+    const { data } = await albumsCollection()
+      .doc(albumId)
+      .field({ _id: true, tags: true })
+      .get();
+
+    const document = Array.isArray(data) ? data[0] : data;
+
+    return ((document?.tags ?? []) as string[]);
+  }, 'getTagsForAlbum');
+
+/**
+ * Recomputes the denormalized album fields (`photoCount`, `tags`) that
+ * replace the former `album_photo` join table.
+ */
+export const syncAlbumsForIds = async (albumIds: string[]) => {
+  const uniqueAlbumIds = [...new Set(albumIds.filter(Boolean))];
+
+  await Promise.all(uniqueAlbumIds.map(async albumId => {
+    const photoCount = await photosCollection()
+      .where({ albumIds: albumId })
+      .count()
+      .then(({ total }) => parseInt(`${total ?? 0}`, 10))
+      .catch(() => 0);
+
+    // `$unwind` + `$group` replaces `SELECT DISTINCT unnest(p.tags)`
+    const list = await photosCollection()
+      .aggregate()
+      .match({ albumIds: albumId })
+      .unwind('$tags')
+      .group({ _id: '$tags' })
+      .end()
+      .then(result => parseAggregateList<{ _id: string }>(result));
+
+    const tags = list
+      .map(({ _id }) => _id)
+      .filter((tag): tag is string => Boolean(tag))
+      .sort();
+
+    await albumsCollection().doc(albumId).update({
+      photoCount,
+      tags,
+      updatedAt: new Date(),
+    }).catch(() => undefined);
+  }));
+};
+
+/** Full album list, used by data backfills */
+export const getAllAlbumIds = () =>
+  fetchAllPages<Record<string, any>>(() => albumsCollection())
+    .then(albums => albums.map(({ _id }) => _id as string));
