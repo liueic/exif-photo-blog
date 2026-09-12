@@ -124,9 +124,9 @@ export const TEXT: I18N = {
   auth: {
     signIn: 'Iniciar sesión',
     signOut: 'Cerrar sesión',
-    email: 'Email del administrador',
-    password: 'Contraseña del administrador',
-    invalidEmailPassword: 'Email/contraseña no válidos',
+    emailLabel: 'Email del administrador',
+    passwordLabel: 'Contraseña del administrador',
+    signInError: 'Email/contraseña no válidos',
   },
   admin: {
     uploadPhotos: 'Subir fotos',

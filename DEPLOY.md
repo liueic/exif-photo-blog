@@ -26,7 +26,7 @@ reports their presence as booleans.
 | `NEXT_PUBLIC_CLOUDBASE_STORAGE_DOMAIN` | ✅ | Storage CDN domain (also a `next/image` remote pattern) |
 | `NEXT_PUBLIC_CLOUDBASE_STORAGE_REGION` | ➖ | Bucket region, e.g. `ap-shanghai` |
 | `CLOUDBASE_AI_API_KEY` | ➖ | CloudBase AI key (see below) |
-| `CLOUDBASE_AI_MODEL` | ➖ | Vision model id, defaults to `glm-5v-turbo` |
+| `CLOUDBASE_AI_MODEL` | ➖ | Model id, defaults to `hy3` (text-only — see vision caveat below) |
 | `REDIS_URL` / `REDIS_TOKEN` | ➖ | Upstash rate limiting (optional, off when unset) |
 
 `NEXT_PUBLIC_*` variables are inlined at build time. The pipeline relies on
@@ -35,9 +35,9 @@ override them there when targeting a different environment.
 
 ### 2. CloudBase AI (LLM quota)
 
-1. In the CloudBase console open **AI → 模型管理** and enable a vision model
-   (`glm-5v-turbo`, `qwen3.5-plus`, or `kimi-k2.6`). Text-only models such
-   as `deepseek-v4-flash` cannot process photos.
+1. In the CloudBase console open **AI → 模型管理** and check which models
+   are enabled for the environment. The bundled free model is `hy3`
+   (Hunyuan text generation; legacy hunyuan ids auto-switch to it).
 2. Create an environment API key at
    [tcb.cloud.tencent.com/dev#/env/apikey](https://tcb.cloud.tencent.com/dev#/env/apikey)
    and store it as `CLOUDBASE_AI_API_KEY` on the service. The storage
@@ -47,6 +47,14 @@ Billing uses the environment's resource points (体验版 includes a monthly
 allotment). The gateway does not support `response_format: json_schema`, so
 structured generation (title/caption/tags) automatically switches to a
 JSON-in-prompt contract with client-side zod validation — no extra config.
+
+> **Vision caveat:** `hy3` is a text-only model, but every AI feature in
+> this app sends a photo for description. With `hy3`, AI field generation
+> fails gracefully (uploads succeed, fields are simply left empty and
+> flagged) — a vision model such as `glm-5v-turbo` or `kimi-k2.6` must be
+> enabled in the console and set via `CLOUDBASE_AI_MODEL` for descriptions
+> to work. Availability of vision models varies; several series carry
+> offline notices.
 
 ### 3. GitHub Actions secrets
 

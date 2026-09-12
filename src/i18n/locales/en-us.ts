@@ -123,9 +123,9 @@ export const TEXT = {
   auth: {
     signIn: 'Sign In',
     signOut: 'Sign Out',
-    email: 'Admin Email',
-    password: 'Admin Password',
-    invalidEmailPassword: 'Invalid email/password',
+    emailLabel: 'Admin Email',
+    passwordLabel: 'Admin Password',
+    signInError: 'Invalid email/password',
   },
   admin: {
     uploadPhotos: 'Upload Photos',

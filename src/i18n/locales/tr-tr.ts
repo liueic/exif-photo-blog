@@ -124,9 +124,9 @@ export const TEXT: I18N = {
   auth: {
     signIn: 'Giriş Yap',
     signOut: 'Çıkış Yap',
-    email: 'Yönetici E-posta',
-    password: 'Yönetici Şifre',
-    invalidEmailPassword: 'Geçersiz e-posta/şifre',
+    emailLabel: 'Yönetici E-posta',
+    passwordLabel: 'Yönetici Şifre',
+    signInError: 'Geçersiz e-posta/şifre',
   },
   admin: {
     uploadPhotos: 'Fotoğraf Yükle',

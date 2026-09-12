@@ -124,9 +124,9 @@ export const TEXT: I18N = {
   auth: {
     signIn: '登录',
     signOut: '退出',
-    email: '管理员邮箱',
-    password: '管理员密码',
-    invalidEmailPassword: '邮箱或密码错误',
+    emailLabel: '管理员邮箱',
+    passwordLabel: '管理员密码',
+    signInError: '邮箱或密码错误',
   },
   admin: {
     uploadPhotos: '上传照片',

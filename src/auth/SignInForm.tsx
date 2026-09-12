@@ -89,20 +89,20 @@ export default function SignInForm({
         <div className="space-y-5 w-full -translate-y-0.5">
           {response === KEY_CREDENTIALS_SIGN_IN_ERROR &&
             <ErrorNote>
-              {appText.auth.invalidEmailPassword}
+              {appText.auth.signInError}
             </ErrorNote>}
           <div className="space-y-4 w-full">
             <FieldsetWithStatus
               id="email"
               inputRef={emailRef}
-              label={appText.auth.email}
+              label={appText.auth.emailLabel}
               type="email"
               value={email}
               onChange={setEmail}
             />
             <FieldsetWithStatus
               id="password"
-              label={appText.auth.password}
+              label={appText.auth.passwordLabel}
               type="password"
               value={password}
               onChange={setPassword}

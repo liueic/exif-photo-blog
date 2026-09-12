@@ -109,14 +109,14 @@ To auto-generate text descriptions of photos, configure a provider. On Tencent C
 
 #### CloudBase AI
 
-1. Enable a vision model in the CloudBase console (**AI → 模型管理**), e.g. `glm-5v-turbo` — the model must support image input
-2. Create an environment API key ([env apikey console](https://tcb.cloud.tencent.com/dev#/env/apikey)) and store it in `CLOUDBASE_AI_API_KEY`
+1. Store an environment API key ([env apikey console](https://tcb.cloud.tencent.com/dev#/env/apikey)) in `CLOUDBASE_AI_API_KEY`
    - The base URL is derived from `CLOUDBASE_ENV` automatically
    - Falls back to `CLOUDBASE_APIKEY` (the storage credential) when unset
    - Billing uses the environment's resource points
-3. Optionally set `CLOUDBASE_AI_MODEL` to choose a specific vision model (defaults to `glm-5v-turbo`)
-4. Add [rate limiting](#rate-limiting) (_recommended_)
-5. Configure auto-generated fields (optional, see below for instructions)
+2. Optionally set `CLOUDBASE_AI_MODEL` — defaults to `hy3`, the bundled free Hunyuan text model
+   - **Note:** `hy3` is text-only; photo descriptions additionally require a vision model (e.g. `glm-5v-turbo`) enabled in the CloudBase console (**AI → 模型管理**) — with a text-only model, AI generation fails gracefully while uploads continue
+3. Add [rate limiting](#rate-limiting) (_recommended_)
+4. Configure auto-generated fields (optional, see below for instructions)
 
 #### Vercel AI Gateway
 

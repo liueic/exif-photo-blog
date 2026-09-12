@@ -124,9 +124,9 @@ export const TEXT: I18N = {
   auth: {
     signIn: 'Masuk',
     signOut: 'Keluar',
-    email: 'Email Admin',
-    password: 'Kata Sandi Admin',
-    invalidEmailPassword: 'Email/kata sandi tidak valid',
+    emailLabel: 'Email Admin',
+    passwordLabel: 'Kata Sandi Admin',
+    signInError: 'Email/kata sandi tidak valid',
   },
   admin: {
     uploadPhotos: 'Unggah Foto',

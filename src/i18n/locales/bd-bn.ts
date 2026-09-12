@@ -124,9 +124,9 @@ export const TEXT: I18N = {
   auth: {
     signIn: 'সাইন ইন',
     signOut: 'সাইন আউট',
-    email: 'অ্যাডমিন ইমেইল',
-    password: 'অ্যাডমিন পাসওয়ার্ড',
-    invalidEmailPassword: 'ইমেইল বা পাসওয়ার্ড ভুল',
+    emailLabel: 'অ্যাডমিন ইমেইল',
+    passwordLabel: 'অ্যাডমিন পাসওয়ার্ড',
+    signInError: 'ইমেইল বা পাসওয়ার্ড ভুল',
   },
   admin: {
     uploadPhotos: 'ছবি আপলোড করুন',

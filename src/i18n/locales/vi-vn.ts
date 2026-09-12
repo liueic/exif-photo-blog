@@ -124,9 +124,9 @@ export const TEXT: I18N = {
   auth: {
     signIn: 'Đăng nhập',
     signOut: 'Đăng xuất',
-    email: 'Email quản trị',
-    password: 'Mật khẩu quản trị',
-    invalidEmailPassword: 'Email/mật khẩu không hợp lệ',
+    emailLabel: 'Email quản trị',
+    passwordLabel: 'Mật khẩu quản trị',
+    signInError: 'Email/mật khẩu không hợp lệ',
   },
   admin: {
     uploadPhotos: 'Tải lên ảnh',

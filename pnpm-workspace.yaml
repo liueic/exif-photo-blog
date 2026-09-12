@@ -3,6 +3,7 @@ allowBuilds:
   '@parcel/watcher': true
   '@tailwindcss/oxide': true
   '@vercel/speed-insights': true
+  core-js-pure: true
   oxc-resolver: true
   sharp: true
   unrs-resolver: true
