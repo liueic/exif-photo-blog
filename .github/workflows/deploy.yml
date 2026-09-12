@@ -61,13 +61,17 @@ jobs:
 
       - name: Deploy service
         # Uploads the source (including the Dockerfile) and builds remotely;
-        # NEXT_PUBLIC_* build args use the Dockerfile defaults for this env
+        # NEXT_PUBLIC_* build args use the Dockerfile defaults for this env.
+        # `printf '\n'` pipes Enter into the CLI's gray-release select prompt
+        # (default "No" — auto traffic switch); --yes covers plain confirms
         run: >
+          printf '\n' |
           tcb cloudrun deploy
           -e "$CLOUDBASE_ENV_ID"
           -s "$CLOUDBASE_RUN_SERVICE"
           --port 3000
           --force
+          --yes
           --wait
 
       - name: Verify deployment
